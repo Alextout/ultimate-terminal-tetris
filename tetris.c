@@ -2488,6 +2488,15 @@ static void draw_separator(int x, int y, int w, int color)
     }
 }
 
+static void draw_separator_double(int x, int y, int w, int color)
+{
+    int i;
+
+    for (i = 0; i < w; i++) {
+        scr_put(x + i, y, "═", color, C_DEFAULT, 0);
+    }
+}
+
 static void draw_centered(int y, int color, int bold, const char *fmt, ...)
 {
     char buf[128];
@@ -2551,22 +2560,23 @@ static int g_board_mode;
 
 static void draw_menu(void)
 {
-    int w = 54, h = 21;
+    int w = 54, h = 22;
     int x = (g_scr_w - w) / 2;
     int y = (g_scr_h - h) / 2;
     int len = (int)strlen(g_player);
     int i;
 
     draw_box(x, y, w, h, C_ACCENT);
-    draw_centered(y + 1, C_ACCENT, 1, "TERMINAL TETRIS");
-    draw_centered(y + 2, C_ACCENT, 1, "ULTIMATE");
-    draw_centered(y + 3, C_TEXT, 0, "by Alextout");
-    draw_separator(x + 2, y + 4, w - 4, C_DIM);
+    draw_separator_double(x + 2, y + 1, w - 4, C_ACCENT);
+    draw_centered(y + 2, C_ACCENT, 1, "U L T I M A T E");
+    draw_centered(y + 3, C_ACCENT, 1, "TERMINAL TETRIS");
+    draw_centered(y + 4, C_TEXT, 0, "by Alextout");
+    draw_separator_double(x + 2, y + 5, w - 4, C_ACCENT);
 
     /* the name that goes on the scoreboard */
     {
         int sel = (g_menu_sel == MENU_NAME);
-        int row = y + 5;
+        int row = y + 6;
 
         scr_text(x + 4, row, sel ? C_ACCENT : C_TEXT, sel,
                  "%s %-9s", sel ? ">" : " ", "NAME");
@@ -2591,7 +2601,7 @@ static void draw_menu(void)
 
     for (i = MENU_MARATHON; i <= MENU_ZEN; i++) {
         int sel = (i == g_menu_sel);
-        int row = y + 7 + (i - MENU_MARATHON);
+        int row = y + 8 + (i - MENU_MARATHON);
         int mode = i - MENU_MARATHON;
 
         scr_text(x + 4, row, sel ? C_ACCENT : C_TEXT, sel,
@@ -2611,15 +2621,15 @@ static void draw_menu(void)
     {
         int sel = (g_menu_sel == MENU_BOARD);
 
-        scr_text(x + 4, y + 12, sel ? C_ACCENT : C_TEXT, sel,
+        scr_text(x + 4, y + 13, sel ? C_ACCENT : C_TEXT, sel,
                  "%s %-9s", sel ? ">" : " ", "SCOREBOARD");
-        scr_text(x + 17, y + 12, C_DIM, 0, "who got how far");
+        scr_text(x + 17, y + 13, C_DIM, 0, "who got how far");
     }
 
-    draw_separator(x + 2, y + 13, w - 4, C_DIM);
-    draw_centered(y + 14, C_DIM, 0, "guideline rules, NES handling");
-    draw_centered(y + 16, C_DIM, 0, "after the DVK tetris by Kirill Timofeev");
-    draw_centered(y + 17, C_DIM, 0, "github.com/kt97679/tetris");
+    draw_separator(x + 2, y + 14, w - 4, C_DIM);
+    draw_centered(y + 15, C_DIM, 0, "guideline rules, NES handling");
+    draw_centered(y + 17, C_DIM, 0, "after the DVK tetris by Kirill Timofeev");
+    draw_centered(y + 18, C_DIM, 0, "github.com/kt97679/tetris");
     draw_centered(y + h - 2, C_DIM, 0, g_name_editing
                   ? "type a name   backspace deletes   enter done"
                   : "up/down choose   enter select   q quit");
