@@ -105,11 +105,12 @@ timing.
 ## Credits
 
 Written by Alextout together with [Claude](https://claude.com/claude-code)
-(Claude Code, Opus 5) — every commit is co-authored accordingly.
+(Claude Code, Opus 5) and [Pi](https://github.com/badlogic/pi-coding-agent)
+(MiniMax-M3) — every commit is co-authored accordingly.
 
 Grew out of the C port in **Kirill Timofeev**'s
 [tetris](https://github.com/kt97679/tetris), a recreation of the game from
 soviet DVK machines. None of that code is left, but it is where this started.
 
-Licensed under the [MIT License](LICENSE).
+License: [MIT License](LICENSE).
 
