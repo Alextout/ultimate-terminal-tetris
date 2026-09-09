@@ -17,7 +17,7 @@ header, the README and the start screen. Do not quietly drop it.
 ```sh
 make                                         # must stay warning free
 make check                                   # selftest plus the pty tools
-./tetris --selftest                          # 15 headless checks, no terminal
+./tetris --selftest                          # 16 headless checks, no terminal
 tools/screen_check.py ./tetris               # renderer vs full repaint
 tools/softdrop_check.py ./tetris             # soft drop timing
 tools/bench.py ./tetris                      # cpu, memory, frame size
@@ -95,6 +95,13 @@ below a few dozen milliseconds or arrow keys start registering as escapes.
 published SRS tables with every y negated, because this code has y growing
 downwards. If you touch them, `test_tspin` is the check that matters — it
 rotates a T into a slot reachable only through the third kick offset.
+
+**Zen is one run per name, not one per session.** `board_record` updates that
+player's existing zen entry instead of appending: the score replaces, lines
+and time add up. `zen_carry` reads it back when a zen run starts. Because the
+score is a running total, leaving mid-run must not drop it — `zen_bank` is
+called on quit, on restart and on the way out of `main`, guarded by
+`g_submitted` so a run is never counted twice.
 
 **Typed text is a separate channel.** `g_text` collects characters as typed,
 case intact, because the key state lowercases everything — bindings do not

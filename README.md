@@ -80,6 +80,11 @@ the three-corner rule, back-to-back, combos and perfect clears.
 Four modes — marathon, sprint, ultra, zen — plus a name field and a scoreboard
 you can open from the menu.
 
+**Zen never resets.** Its score is banked under the name you are playing as
+and picked up again the next time, so a name works like a save slot. Rename
+yourself and zen starts from zero; rename back and your total is waiting. The
+menu shows what you are continuing at.
+
 ## Files
 
 Everything stays in this folder, nothing lands in your home directory. Copy
@@ -93,7 +98,7 @@ yours alone.
 make check
 ```
 
-15 headless checks of the rules inside the binary, plus tools that drive the
+16 headless checks of the rules inside the binary, plus tools that drive the
 real game on a pseudo terminal to verify the renderer and the soft drop
 timing.
 

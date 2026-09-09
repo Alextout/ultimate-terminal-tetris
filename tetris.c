@@ -2249,37 +2249,81 @@ static void board_trim(int mode)
     g_board_count = j;
 }
 
-/* Records a run and returns the place it took, or 0 if it missed the board. */
-static int board_add(const game_t *g)
+/* The entry a player already has in a mode, or -1. */
+static int board_find(int mode, const char *name)
+{
+    int i;
+
+    for (i = 0; i < g_board_count; i++) {
+        if (g_board[i].mode == mode && strcmp(g_board[i].name, name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* Zen never really ends: a player picks their score back up where they left
+ * it, so the score to start a zen run with is whatever that name has banked. */
+static long zen_carry(const char *name)
+{
+    int i = board_find(MODE_ZEN, name);
+
+    return i >= 0 ? g_board[i].score : 0;
+}
+
+/* Puts a run into the table in memory and returns its index, or -1. */
+static int board_record(const game_t *g)
 {
     score_entry *e;
     time_t now = time(NULL);
     struct tm *tm = localtime(&now);
-    int idx[BOARD_SHOWN];
-    int mine, n, i, rank = 0;
+    int mine;
 
-    if (g_board_count >= BOARD_MAX) {
-        board_trim(g->mode);
+    const char *name = g->player[0] ? g->player : "anon";
+
+    /* Zen keeps one running entry per name rather than one per session: the
+     * score already carries the earlier total, lines and time add up. */
+    mine = (g->mode == MODE_ZEN) ? board_find(MODE_ZEN, name) : -1;
+    if (mine >= 0) {
+        e = &g_board[mine];
+        e->score = g->score;
+        e->lines += g->lines;
+        e->time_us += g->elapsed_us;
+    } else {
+        if (g_board_count >= BOARD_MAX) {
+            board_trim(g->mode);
+        }
+        if (g_board_count >= BOARD_MAX) {
+            return -1;
+        }
+        mine = g_board_count++;
+        e = &g_board[mine];
+        memset(e, 0, sizeof(*e));
+        e->mode = g->mode;
+        e->score = g->score;
+        e->lines = g->lines;
+        e->time_us = g->elapsed_us;
+        snprintf(e->name, sizeof(e->name), "%s", name);
     }
-    if (g_board_count >= BOARD_MAX) {
-        return 0;
-    }
-    e = &g_board[g_board_count++];
-    memset(e, 0, sizeof(*e));
-    e->mode = g->mode;
-    e->score = g->score;
-    e->lines = g->lines;
-    e->time_us = g->elapsed_us;
     e->finished = g->finished;
     if (tm) {
         strftime(e->date, sizeof(e->date), "%Y-%m-%d", tm);
     } else {
         snprintf(e->date, sizeof(e->date), "?");
     }
-    snprintf(e->name, sizeof(e->name), "%s",
-             g->player[0] ? g->player : "anon");
+    return mine;
+}
 
-    mine = g_board_count - 1;
+/* Records a run and returns the place it took, or 0 if it missed the board. */
+static int board_add(const game_t *g)
+{
+    int idx[BOARD_SHOWN];
+    int mine, n, i, rank = 0;
+
+    mine = board_record(g);
+    if (mine < 0) {
+        return 0;
+    }
     n = board_top(g->mode, idx, BOARD_SHOWN);
     for (i = 0; i < n; i++) {
         if (idx[i] == mine) {
@@ -2541,7 +2585,17 @@ static void draw_menu(void)
 
         scr_text(x + 4, row, sel ? C_ACCENT : C_TEXT, sel,
                  "%s %-9s", sel ? ">" : " ", MODE_NAME[mode]);
-        scr_text(x + 17, row, C_DIM, 0, "%s", MODE_DESC[mode]);
+        if (mode == MODE_ZEN) {
+            long carry = zen_carry(g_player[0] ? g_player : "anon");
+
+            if (carry > 0) {
+                scr_text(x + 17, row, C_GOOD, 0, "continues at %ld", carry);
+            } else {
+                scr_text(x + 17, row, C_DIM, 0, "%s", MODE_DESC[mode]);
+            }
+        } else {
+            scr_text(x + 17, row, C_DIM, 0, "%s", MODE_DESC[mode]);
+        }
     }
     {
         int sel = (g_menu_sel == MENU_BOARD);
@@ -3286,6 +3340,69 @@ static int test_lock_out(void)
 }
 
 /* Each mode has to end on its own goal and Zen on none. */
+/* Zen is one running total per name: leaving and coming back under the same
+ * name picks the score up, a different name starts from nothing. */
+static int test_zen_carry(void)
+{
+    game_t g;
+    int ok = 1;
+    int i;
+
+    g_board_count = 0;
+
+    memset(&g, 0, sizeof(g));
+    g.mode = MODE_ZEN;
+    g.score = 10000;
+    g.lines = 40;
+    g.elapsed_us = 60000000;
+    snprintf(g.player, sizeof(g.player), "alex");
+    board_record(&g);
+    if (zen_carry("alex") != 10000 || zen_carry("jonas") != 0) {
+        ok = 0;
+    }
+
+    /* a second session under the same name updates that one entry */
+    memset(&g, 0, sizeof(g));
+    g.mode = MODE_ZEN;
+    snprintf(g.player, sizeof(g.player), "alex");
+    g.score = zen_carry(g.player) + 2500;
+    g.lines = 10;
+    g.elapsed_us = 30000000;
+    board_record(&g);
+    i = board_find(MODE_ZEN, "alex");
+    if (g_board_count != 1 || zen_carry("alex") != 12500) {
+        ok = 0;
+    }
+    if (i < 0 || g_board[i].lines != 50 || g_board[i].time_us != 90000000) {
+        ok = 0;              /* lines and time add up, the score replaces */
+    }
+
+    /* another name is a separate run and leaves the first alone */
+    memset(&g, 0, sizeof(g));
+    g.mode = MODE_ZEN;
+    snprintf(g.player, sizeof(g.player), "jonas");
+    g.score = zen_carry(g.player) + 300;
+    board_record(&g);
+    if (g_board_count != 2 || zen_carry("jonas") != 300 ||
+        zen_carry("alex") != 12500) {
+        ok = 0;
+    }
+
+    /* other modes still append one entry per run */
+    memset(&g, 0, sizeof(g));
+    g.mode = MODE_MARATHON;
+    g.score = 500;
+    snprintf(g.player, sizeof(g.player), "alex");
+    board_record(&g);
+    board_record(&g);
+    if (g_board_count != 4) {
+        ok = 0;
+    }
+
+    g_board_count = 0;
+    return ok;
+}
+
 static int test_modes(void)
 {
     game_t g;
@@ -3344,6 +3461,7 @@ static int run_selftest(void)
     check(test_gravity(), "gravity curve falls with the level");
     check(test_lock_out(), "blocked spawn ends the game");
     check(test_modes(), "each mode ends on its own goal");
+    check(test_zen_carry(), "zen keeps a running score per name");
     printf("\n%s\n", g_test_fail ? "FAILURES" : "all tests passed");
     return g_test_fail ? 1 : 0;
 }
@@ -3356,11 +3474,25 @@ static int g_in_menu = 1;
 static int g_in_board;
 static int g_submitted;
 
+/* Bank an unfinished zen run. Leaving mid-run must not throw the score away,
+ * because in zen the score is the player's running total, not one session's. */
+static void zen_bank(void)
+{
+    if (!g_in_menu && !g_submitted && g_game.mode == MODE_ZEN &&
+        g_game.state != STATE_GAMEOVER && g_game.pieces > 0) {
+        g_submitted = 1;
+        board_add(&g_game);
+    }
+}
+
 static void start_game(int mode)
 {
     game_reset(&g_game, mode);
     snprintf(g_game.player, sizeof(g_game.player), "%s",
              g_player[0] ? g_player : "anon");
+    if (mode == MODE_ZEN) {
+        g_game.score = zen_carry(g_game.player);
+    }
     g_last_rank = 0;
     g_in_menu = 0;
     g_submitted = 0;
@@ -3509,6 +3641,7 @@ int main(int argc, char **argv)
         } else {
             g_text_len = 0;
             if (action_pressed(ACT_QUIT)) {
+                zen_bank();
                 break;
             }
             if (action_pressed(ACT_STYLE)) {
@@ -3575,6 +3708,7 @@ int main(int argc, char **argv)
             if (action_down(ACT_RESTART)) {
                 g_restart_hold += dt;
                 if (g_restart_hold >= RESTART_HOLD_US) {
+                    zen_bank();
                     start_game(g_game.mode);
                 }
             } else {
@@ -3625,6 +3759,7 @@ int main(int argc, char **argv)
         wait_for_frame(frame_start);
     }
 
+    zen_bank();
     term_restore();
     return 0;
 }
