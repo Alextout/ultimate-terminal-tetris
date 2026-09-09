@@ -24,7 +24,9 @@ tools/bench.py ./tetris                      # cpu, memory, frame size
 
 `--selftest` needs no terminal and is the fast feedback loop. The `tools/`
 scripts drive the real binary on a pseudo terminal; they are Python 3 and
-depend on nothing outside the standard library.
+depend on nothing outside the standard library. They run a copy of the binary
+from a scratch directory, because the game keeps its config and scores next to
+it and a test run would otherwise rewrite the player's own files.
 
 The game refuses to run when stdin or stdout is not a tty, so never launch it
 straight from a shell tool — it would sit there forever. Go through

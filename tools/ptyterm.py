@@ -8,6 +8,7 @@ character ended up in which cell.
 Used by the tools next to this file. Not part of the game.
 """
 
+import atexit
 import codecs
 import fcntl
 import os
@@ -15,7 +16,9 @@ import pty
 import re
 import select
 import signal
+import shutil
 import struct
+import tempfile
 import termios
 import time
 
@@ -143,10 +146,29 @@ KEYS = {
 }
 
 
+_SANDBOX = {}
+
+
+def _sandboxed(binary):
+    """A copy of the binary in a throwaway directory, made once per run."""
+    binary = os.path.abspath(binary)
+    if binary not in _SANDBOX:
+        tmp = tempfile.mkdtemp(prefix="utt-test-")
+        atexit.register(shutil.rmtree, tmp, True)
+        copy = os.path.join(tmp, os.path.basename(binary))
+        shutil.copy2(binary, copy)
+        _SANDBOX[binary] = copy
+    return _SANDBOX[binary]
+
+
 class Game:
     """The game running on a pseudo terminal."""
 
     def __init__(self, binary, args=(), cols=100, rows=30, home=None):
+        # The game keeps its config and high scores next to the binary, so run
+        # a copy from a scratch directory. Otherwise every test run would edit
+        # the player's settings and overwrite their scores.
+        binary = _sandboxed(binary)
         self.screen = Screen(cols, rows)
         # a read can split a multi-byte character, so decoding has to carry
         # the leftover bytes into the next chunk
