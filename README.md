@@ -1,6 +1,6 @@
 # ultimate-terminal-tetris
 
-A guideline tetris for the terminal, with the feel of the NES original.
+Tetris for the terminal, with the feel of the NES original.
 Single C file, no dependencies, one compiler call.
 
 ```
@@ -38,6 +38,18 @@ clang -O2 -o tetris tetris.c
 
 Nothing else is needed: no libraries, not even libm. It builds with gcc just
 as well. Tested on macOS with Apple clang and on an arm64 Mac.
+
+To have it as a command anywhere, link the binary into a directory on your
+PATH:
+
+```sh
+ln -s "$PWD/tetris" /opt/homebrew/bin/tetris     # or ~/bin, /usr/local/bin, ...
+```
+
+The game asks the system where its own binary is and follows the symlink, so
+it still finds `config` and `scoreboard` in this folder no matter which
+directory you start it from. Rebuilding keeps the link working; removing the
+command is one `rm` on the link.
 
 ## What is in it
 

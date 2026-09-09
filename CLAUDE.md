@@ -100,10 +100,15 @@ case intact, because the key state lowercases everything — bindings do not
 care about shift, the name field does. Only the name editor reads it, and the
 main loop clears it every frame it is not editing.
 
-**The game owns its folder.** `config` and `scoreboard` sit next to the binary,
-found through `locate_base_dir` from `argv[0]`. Nothing is written to
-`~/.config` or `~/.local`; keep it that way. Started through PATH with no
-slash in `argv[0]` it falls back to the working directory.
+**The game owns its folder.** `config` and `scoreboard` sit next to the binary.
+Nothing is written to `~/.config` or `~/.local`; keep it that way.
+
+`locate_base_dir` cannot trust `argv[0]`: run as a bare command off PATH it is
+just `"tetris"` with no directory, and the game would look for its files in
+whatever directory the player happened to be in. It asks the system instead —
+`_NSGetExecutablePath` on macOS, `/proc/self/exe` on Linux — then `realpath`s
+the answer so a symlink from a bin directory resolves back here. `argv[0]` is
+only the fallback, and the working directory the fallback after that.
 
 ## Conventions
 

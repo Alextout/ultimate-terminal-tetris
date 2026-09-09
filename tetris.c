@@ -31,6 +31,9 @@
 #include <sys/time.h>
 #include <termios.h>
 #include <time.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>        /* _NSGetExecutablePath */
+#endif
 #include <unistd.h>
 
 /* ------------------------------------------------------------------ *
@@ -2033,11 +2036,36 @@ static char g_base_dir[1024] = ".";
 
 static void locate_base_dir(const char *argv0)
 {
+    char raw[2048];
     char *resolved;
     char *slash;
 
-    if (argv0 && strchr(argv0, '/')) {
-        resolved = realpath(argv0, NULL);
+    /* argv[0] is only a hint: started as a bare command from PATH it carries
+     * no directory at all, so ask the system where this binary really is. */
+    raw[0] = '\0';
+#if defined(__APPLE__)
+    {
+        uint32_t size = sizeof(raw);
+
+        if (_NSGetExecutablePath(raw, &size) != 0) {
+            raw[0] = '\0';
+        }
+    }
+#elif defined(__linux__)
+    {
+        ssize_t len = readlink("/proc/self/exe", raw, sizeof(raw) - 1);
+
+        raw[len > 0 ? (size_t)len : 0] = '\0';
+    }
+#endif
+    if (!raw[0] && argv0 && strchr(argv0, '/')) {
+        snprintf(raw, sizeof(raw), "%s", argv0);
+    }
+
+    if (raw[0]) {
+        /* Resolve symlinks, so a "tetris" installed into a bin directory
+         * still finds the config and the scoreboard in the project folder. */
+        resolved = realpath(raw, NULL);
         if (resolved) {
             slash = strrchr(resolved, '/');
             if (slash && slash != resolved) {
@@ -2049,7 +2077,7 @@ static void locate_base_dir(const char *argv0)
             free(resolved);
         }
     }
-    /* started through PATH: fall back to where we were launched from */
+    /* nothing worked: fall back to where we were launched from */
     if (!getcwd(g_base_dir, sizeof(g_base_dir))) {
         snprintf(g_base_dir, sizeof(g_base_dir), ".");
     }
