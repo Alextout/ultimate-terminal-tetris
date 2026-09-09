@@ -26,14 +26,16 @@ def check(binary, seed):
     game.settle()
     game.key("enter", 0.3)
 
-    # spread the pieces out so the stack does not top out mid-run
+    # Spread the pieces out so the stack does not top out mid-run. The gap
+    # between taps has to clear the fallback key-hold window, or the game
+    # reads them as one held key and charges DAS instead of stepping.
     random.seed(int(seed))
     for i in range(10):
         steps = i - 5
         for _ in range(abs(steps)):
-            game.key("left" if steps < 0 else "right", 0.04)
+            game.key("left" if steps < 0 else "right", 0.09)
         for _ in range(random.randint(0, 2)):
-            game.key(random.choice(["x", "z", "a"]), 0.04)
+            game.key(random.choice(["x", "z", "a"]), 0.06)
         game.key("space", 0.18)
 
     # look before pausing: escape on the game over screen goes to the menu,

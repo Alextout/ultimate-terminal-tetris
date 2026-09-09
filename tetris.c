@@ -256,8 +256,8 @@ enum {
 };
 
 static config_t g_cfg = {
-    .das_us = 133000,
-    .arr_us = 0,
+    .das_us = 266000,   /* NES: 16 frames before the auto shift starts */
+    .arr_us = 100000,   /* NES: one cell every 6 frames after that */
     .sdf = 30,          /* NES: one row every two frames at 60 Hz */
     .style = STYLE_SOLID,
     .mode = MODE_MARATHON,
@@ -1578,6 +1578,7 @@ static void kitty_enable(void)
  * ------------------------------------------------------------------ */
 
 static int g_shift_dir;
+static int g_das_charged;
 static int g_soft_held;
 static long g_das_acc;
 static long g_arr_acc;
@@ -1607,6 +1608,7 @@ static void update_shift(game_t *g, long dt)
         g_shift_dir = 0;
         g_das_acc = 0;
         g_arr_acc = 0;
+        g_das_charged = 0;
         return;
     }
 
@@ -1614,6 +1616,7 @@ static void update_shift(game_t *g, long dt)
         g_shift_dir = dir;
         g_das_acc = 0;
         g_arr_acc = 0;
+        g_das_charged = 0;
         if (dir) {
             try_move(g, dir, 0);
         }
@@ -1624,16 +1627,34 @@ static void update_shift(game_t *g, long dt)
     }
 
     g_das_acc += dt;
-    if (g_das_acc < g_cfg.das_us) {
-        return;
-    }
-    if (g_cfg.arr_us <= 0) {
-        while (try_move(g, dir, 0)) {
-            /* ARR 0 slides all the way to the wall */
+    if (!g_das_charged) {
+        if (g_das_acc < g_cfg.das_us) {
+            return;
         }
-        return;
+        g_das_charged = 1;
+        if (g_cfg.arr_us <= 0) {
+            while (try_move(g, dir, 0)) {
+                /* ARR 0 slides all the way to the wall */
+            }
+            return;
+        }
+        /* The first auto shift lands the moment the delay runs out, not one
+         * repeat later. Whatever the frame overshot by carries into the next
+         * repeat so the rate does not drift. */
+        g_arr_acc = g_das_acc - g_cfg.das_us;
+        if (!try_move(g, dir, 0)) {
+            return;
+        }
+    } else {
+        if (g_cfg.arr_us <= 0) {
+            while (try_move(g, dir, 0)) {
+                /* still held against the wall */
+            }
+            return;
+        }
+        g_arr_acc += dt;
     }
-    g_arr_acc += dt;
+
     while (g_arr_acc >= g_cfg.arr_us) {
         g_arr_acc -= g_cfg.arr_us;
         if (!try_move(g, dir, 0)) {
@@ -2429,8 +2450,10 @@ static void usage(void)
     printf("after the DVK tetris by Kirill Timofeev, github.com/kt97679/tetris\n\n");
     printf("usage: tetris [options]\n\n");
     printf("  --mode=marathon|sprint|ultra|zen   game mode (default marathon)\n");
-    printf("  --das=MS        delayed auto shift in ms (default 133)\n");
-    printf("  --arr=MS        auto repeat rate in ms, 0 = instant (default 0)\n");
+    printf("  --das=MS        delay before the auto shift starts, ms (default 266,\n");
+    printf("                  the NES 16 frames)\n");
+    printf("  --arr=MS        auto shift rate in ms, 0 = slide to the wall\n");
+    printf("                  (default 100, the NES 6 frames)\n");
     printf("  --sdf=N         soft drop speed in rows/s, 0 = instant (default 30,\n");
     printf("                  the NES rate of one row every two frames)\n");
     printf("  --style=solid|classic\n");
@@ -2654,6 +2677,68 @@ static int test_clear_animation(void)
 
 /* Pressing soft drop must move exactly one row, however much gravity had
  * accumulated before the press. */
+/* Holding a direction: one cell on the press, nothing until the delay runs
+ * out, then a steady cell per repeat. */
+static int test_das_arr(void)
+{
+    game_t g;
+    long saved_das = g_cfg.das_us;
+    long saved_arr = g_cfg.arr_us;
+    int x0, i, ok = 1;
+
+    g_cfg.das_us = 266000;      /* the NES 16 frames */
+    g_cfg.arr_us = 100000;      /* and 6 frames between repeats */
+    memset(&g, 0, sizeof(g));
+    g.hold = -1;
+    g.level = 1;
+    g.state = STATE_PLAYING;
+    rng_seed(5);
+    bag_refill(&g);
+    queue_fill(&g);
+    spawn_piece(&g, PIECE_T);
+    keys_clear();
+    g_shift_dir = 0;
+    g_das_acc = 0;
+    g_arr_acc = 0;
+    g_das_charged = 0;
+    x0 = g.x;
+
+    key_press(K_LEFT, 1000);
+    update_shift(&g, 16000);
+    if (g.x != x0 - 1) {
+        ok = 0;                 /* the press itself moves one cell */
+    }
+    for (i = 0; i < 15; i++) {  /* 240 ms, still inside the delay */
+        update_shift(&g, 16000);
+    }
+    if (g.x != x0 - 1) {
+        ok = 0;
+    }
+    update_shift(&g, 32000);    /* 272 ms: the delay expires and it moves */
+    if (g.x != x0 - 2) {
+        ok = 0;
+    }
+    for (i = 0; i < 5; i++) {   /* 80 ms is not yet a repeat */
+        update_shift(&g, 16000);
+    }
+    if (g.x != x0 - 2) {
+        ok = 0;
+    }
+    update_shift(&g, 32000);    /* past 100 ms: the next cell */
+    if (g.x != x0 - 3) {
+        ok = 0;
+    }
+
+    keys_clear();
+    g_shift_dir = 0;
+    g_das_acc = 0;
+    g_arr_acc = 0;
+    g_das_charged = 0;
+    g_cfg.das_us = saved_das;
+    g_cfg.arr_us = saved_arr;
+    return ok;
+}
+
 static int test_soft_drop_start(void)
 {
     game_t g;
@@ -2877,6 +2962,7 @@ static int run_selftest(void)
     check(test_tspin(), "SRS kick into a T-slot is a full T-spin");
     check(test_line_clear(), "completed row clears and the stack drops");
     check(test_clear_animation(), "clear animation resolves into a new piece");
+    check(test_das_arr(), "auto shift waits for DAS then repeats at ARR");
     check(test_soft_drop_start(), "soft drop starts with a single row");
     check(test_soft_drop_rate(), "soft drop holds the NES rate at any level");
     check(test_scoring(), "scoring, back-to-back and combo");
@@ -2903,6 +2989,7 @@ static void start_game(int mode)
     g_shift_dir = 0;
     g_das_acc = 0;
     g_arr_acc = 0;
+    g_das_charged = 0;
     keys_clear();
 }
 

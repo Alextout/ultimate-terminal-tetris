@@ -16,7 +16,7 @@ header, the README and the start screen. Do not quietly drop it.
 
 ```sh
 clang -O2 -Wall -Wextra -o tetris tetris.c   # must stay warning free
-./tetris --selftest                          # 13 headless checks
+./tetris --selftest                          # 14 headless checks
 tools/screen_check.py ./tetris               # renderer vs full repaint
 tools/softdrop_check.py ./tetris             # soft drop timing
 tools/bench.py ./tetris                      # cpu, memory, frame size
@@ -70,8 +70,13 @@ the diff makes the screen drift from the game state silently. Any change to
 **Timers accumulate.** `gravity_acc` holds up to a whole second at level 1.
 Anything that shortens an interval must reset the counter, or the backlog gets
 cashed in all at once — that is exactly how soft drop used to teleport the
-piece down several rows on the first press. Same care applies to `das_acc` and
-`arr_acc`.
+piece down several rows on the first press. Same care applies to `g_das_acc`
+and `g_arr_acc`.
+
+**The auto shift fires on the edge, not a repeat later.** `g_das_charged`
+marks the moment the delay ran out: the first cell moves right then, and the
+overshoot carries into `g_arr_acc` so the rate does not drift. Resetting the
+direction has to clear that flag too, or the next press skips its delay.
 
 **Press is not repeat.** With the kitty protocol, holding a key gives one
 press and then repeat events. Without it, the OS auto repeat looks like a

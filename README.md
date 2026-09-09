@@ -1,6 +1,6 @@
 # ultimate-terminal-tetris
 
-A guideline tetris for the terminal, with the handling of a modern stacker.
+A guideline tetris for the terminal, with the feel of the NES original.
 Single C file, no dependencies, one compiler call.
 
 ```
@@ -21,8 +21,8 @@ Single C file, no dependencies, one compiler call.
    1           │        ▓▓▓▓        │             r           restart
                │        ▓▓▓▓  ██    │  ████████   q           quit
    TIME        │          ██████    │
-   0:03.223    │          ██        │             DAS 133ms
-               │    ████  ██        │             ARR 0ms
+   0:03.220    │          ██        │             DAS 266ms
+               │    ████  ██        │             ARR 100ms
    PPS         │      ██████        │             SOFT 30/s
    1.55        │    ████████        │
                │  ████  ██████      │
@@ -80,9 +80,14 @@ The three numbers a stacker actually cares about:
 
 | | default | meaning |
 |---|---|---|
-| `das` | 133 ms | how long you hold a direction before it repeats |
-| `arr` | 0 ms | how fast it repeats afterwards; 0 slides straight to the wall |
+| `das` | 266 ms | how long you hold a direction before it starts repeating |
+| `arr` | 100 ms | how fast it repeats afterwards; 0 slides straight to the wall |
 | `sdf` | 30 rows/s | soft drop speed |
+
+The defaults are the NES timings: 16 frames before the auto shift kicks in,
+then one cell every 6 frames. The first repeat lands the moment the delay runs
+out rather than a repeat later. If you are used to a modern stacker, `das=133
+arr=0` is the usual setting there and slides the piece straight to the wall.
 
 Soft drop runs at a **fixed rate** rather than as a multiple of gravity, so it
 feels the same at every level. The default of 30 rows a second is the NES rate
@@ -94,8 +99,8 @@ Set them on the command line or in `~/.config/tetris/config`:
 
 ```ini
 # handling
-das  = 133
-arr  = 0
+das  = 266
+arr  = 100
 sdf  = 30
 
 # looks
@@ -131,7 +136,7 @@ a fixed seed — no terminal involved, so it is fine in CI:
 ./tetris --selftest
 ```
 
-Thirteen checks, covering the kick tables against known cases, the bag, the
+Fourteen checks, covering the kick tables against known cases, the bag, the
 three-corner rule, scoring with back-to-back and combos, the clear animation,
 the soft drop rate and the mode goals.
 
