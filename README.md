@@ -1,5 +1,5 @@
 # ultimate-terminal-tetris
-# by Alextout
+## by Alextout
 
 Tetris for the terminal, with the feel of the NES original.
 One C file, no dependencies, one compiler call.
