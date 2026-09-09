@@ -52,6 +52,10 @@
 #define LOCK_RESET_LIMIT 15
 #define LINE_CLEAR_ANIM_US 150000L
 #define RESTART_HOLD_US 700000L /* hold r this long to throw the run away */
+#define NAME_MAX 16
+#define BOARD_MAX 200
+#define BOARD_PER_MODE 50
+#define BOARD_SHOWN 10
 #define FRAME_US 16666L         /* ~60 Hz */
 
 enum { PIECE_I, PIECE_J, PIECE_L, PIECE_O, PIECE_S, PIECE_T, PIECE_Z, PIECE_COUNT };
@@ -63,6 +67,9 @@ enum { MODE_MARATHON, MODE_SPRINT, MODE_ULTRA, MODE_ZEN, MODE_COUNT };
 enum { STYLE_SOLID, STYLE_CLASSIC, STYLE_COUNT };
 
 enum { STATE_MENU, STATE_PLAYING, STATE_PAUSED, STATE_CLEARING, STATE_GAMEOVER };
+
+enum { MENU_NAME, MENU_MARATHON, MENU_SPRINT, MENU_ULTRA, MENU_ZEN,
+       MENU_BOARD, MENU_COUNT };
 
 enum { SPIN_NONE, SPIN_MINI, SPIN_FULL };
 
@@ -674,6 +681,7 @@ typedef struct {
 
     int topped_out;
     int finished;
+    char player[NAME_MAX + 1];
 } game_t;
 
 static game_t g_game;
@@ -1257,6 +1265,18 @@ static char g_inbuf[4096];
 static size_t g_inlen;
 static long g_esc_since;
 
+/* Characters as typed, case intact, for the name field. The key state below
+ * lowercases everything because bindings do not care about shift. */
+static char g_text[64];
+static int g_text_len;
+
+static void text_push(int c)
+{
+    if (c >= 32 && c < 127 && g_text_len < (int)sizeof(g_text) - 1) {
+        g_text[g_text_len++] = (char)c;
+    }
+}
+
 static long now_us(void)
 {
     struct timeval t;
@@ -1423,7 +1443,12 @@ static size_t parse_csi(size_t i, long ts)
     if (final == 'u') {
         int key = map_kitty_code(params[0]);
         int event = sub[1] ? sub[1] : 1;
+        int mods = params[1] > 0 ? params[1] - 1 : 0;
 
+        if (event != 3 && params[0] >= 32 && params[0] < 127) {
+            /* the protocol reports the unshifted key, so apply shift here */
+            text_push((mods & 1) ? toupper(params[0]) : params[0]);
+        }
         if (event == 1) {
             key_press(key, ts);
         } else if (event == 2) {
@@ -1509,11 +1534,13 @@ static void input_poll(void)
             key_press(K_TAB, ts);
         } else if (c == ' ') {
             key_press(K_SPACE, ts);
+            text_push(' ');
         } else if (c == 3) {
             g_interrupted = 1;
         } else if (c == 127 || c == 8) {
             key_press(K_BACKSPACE, ts);
         } else if (c >= 32 && c < 127) {
+            text_push(c);
             key_press(tolower(c), ts);
         }
         i++;
@@ -1990,6 +2017,254 @@ static void draw_mini(int type, int sx, int sy, int dim)
 }
 
 /* ------------------------------------------------------------------ *
+ * Scoreboard
+ *
+ * Every finished run is appended to a plain text file next to the binary, so
+ * it can be read, edited or thrown away without the game's help. Sprint is a
+ * race and ranks on time; every other mode ranks on score.
+ * ------------------------------------------------------------------ */
+
+static const char *MODE_NAME[MODE_COUNT];
+
+/* Directory the binary sits in. The config file and the scoreboard live
+ * there, so the whole project stays in one folder instead of scattering into
+ * the home directory. */
+static char g_base_dir[1024] = ".";
+
+static void locate_base_dir(const char *argv0)
+{
+    char *resolved;
+    char *slash;
+
+    if (argv0 && strchr(argv0, '/')) {
+        resolved = realpath(argv0, NULL);
+        if (resolved) {
+            slash = strrchr(resolved, '/');
+            if (slash && slash != resolved) {
+                *slash = '\0';
+                snprintf(g_base_dir, sizeof(g_base_dir), "%s", resolved);
+                free(resolved);
+                return;
+            }
+            free(resolved);
+        }
+    }
+    /* started through PATH: fall back to where we were launched from */
+    if (!getcwd(g_base_dir, sizeof(g_base_dir))) {
+        snprintf(g_base_dir, sizeof(g_base_dir), ".");
+    }
+}
+
+typedef struct {
+    int mode;
+    long score;
+    int lines;
+    long time_us;
+    int finished;
+    char date[12];
+    char name[NAME_MAX + 1];
+} score_entry;
+
+static score_entry g_board[BOARD_MAX];
+static int g_board_count;
+static char g_player[NAME_MAX + 1];
+
+static void board_path(char *buf, size_t n)
+{
+    snprintf(buf, n, "%s/scoreboard", g_base_dir);
+}
+
+static void board_load(void)
+{
+    char path[1100];
+    char line[256];
+    FILE *f;
+
+    g_board_count = 0;
+    board_path(path, sizeof(path));
+    f = fopen(path, "r");
+    if (!f) {
+        return;
+    }
+    while (fgets(line, sizeof(line), f) && g_board_count < BOARD_MAX) {
+        char mode[16], date[12], name[NAME_MAX + 1];
+        long score, us;
+        int cleared, finished, i;
+        score_entry *e;
+
+        if (strncmp(line, "player ", 7) == 0) {
+            char *nl;
+
+            snprintf(g_player, sizeof(g_player), "%s", line + 7);
+            nl = strchr(g_player, '\n');
+            if (nl) {
+                *nl = '\0';
+            }
+            continue;
+        }
+        if (sscanf(line, "%15s %ld %d %ld %d %11s %16[^\n]",
+                   mode, &score, &cleared, &us, &finished, date, name) != 7) {
+            continue;
+        }
+        for (i = 0; i < MODE_COUNT; i++) {
+            if (strcmp(mode, MODE_NAME[i]) == 0) {
+                break;
+            }
+        }
+        if (i == MODE_COUNT) {
+            continue;
+        }
+        e = &g_board[g_board_count++];
+        e->mode = i;
+        e->score = score;
+        e->lines = cleared;
+        e->time_us = us;
+        e->finished = finished;
+        snprintf(e->date, sizeof(e->date), "%s", date);
+        snprintf(e->name, sizeof(e->name), "%s", name);
+    }
+    fclose(f);
+}
+
+static void board_save(void)
+{
+    char path[1100];
+    FILE *f;
+    int i;
+
+    board_path(path, sizeof(path));
+    f = fopen(path, "w");
+    if (!f) {
+        return;
+    }
+    fprintf(f, "player %s\n", g_player[0] ? g_player : "anon");
+    for (i = 0; i < g_board_count; i++) {
+        const score_entry *e = &g_board[i];
+
+        fprintf(f, "%s %ld %d %ld %d %s %s\n", MODE_NAME[e->mode], e->score,
+                e->lines, e->time_us, e->finished, e->date, e->name);
+    }
+    fclose(f);
+}
+
+static int ranks_above(const score_entry *a, const score_entry *b)
+{
+    if (a->mode == MODE_SPRINT) {
+        /* a race: finishing beats not finishing, then the quicker time */
+        if (a->finished != b->finished) {
+            return a->finished;
+        }
+        if (a->finished) {
+            return a->time_us < b->time_us;
+        }
+    }
+    if (a->score != b->score) {
+        return a->score > b->score;
+    }
+    return a->lines > b->lines;
+}
+
+/* Fill `out` with the indices of one mode's entries, best first. */
+static int board_top(int mode, int *out, int max)
+{
+    int idx[BOARD_MAX];
+    int n = 0, i, j, t;
+
+    for (i = 0; i < g_board_count; i++) {
+        if (g_board[i].mode == mode) {
+            idx[n++] = i;
+        }
+    }
+    for (i = 1; i < n; i++) {           /* insertion sort: n stays small */
+        t = idx[i];
+        for (j = i; j > 0 && ranks_above(&g_board[t], &g_board[idx[j - 1]]); j--) {
+            idx[j] = idx[j - 1];
+        }
+        idx[j] = t;
+    }
+    if (n > max) {
+        n = max;
+    }
+    for (i = 0; i < n; i++) {
+        out[i] = idx[i];
+    }
+    return n;
+}
+
+/* Keep the file from growing without end: drop a mode's weakest entries. */
+static void board_trim(int mode)
+{
+    int idx[BOARD_MAX];
+    int drop[BOARD_MAX];
+    int n, i, j, d, k = 0;
+
+    n = board_top(mode, idx, BOARD_MAX);
+    if (n <= BOARD_PER_MODE) {
+        return;
+    }
+    for (i = BOARD_PER_MODE; i < n; i++) {
+        drop[k++] = idx[i];
+    }
+    for (i = 0, j = 0; i < g_board_count; i++) {
+        int dropped = 0;
+
+        for (d = 0; d < k; d++) {
+            if (drop[d] == i) {
+                dropped = 1;
+                break;
+            }
+        }
+        if (!dropped) {
+            g_board[j++] = g_board[i];
+        }
+    }
+    g_board_count = j;
+}
+
+/* Records a run and returns the place it took, or 0 if it missed the board. */
+static int board_add(const game_t *g)
+{
+    score_entry *e;
+    time_t now = time(NULL);
+    struct tm *tm = localtime(&now);
+    int idx[BOARD_SHOWN];
+    int mine, n, i, rank = 0;
+
+    if (g_board_count >= BOARD_MAX) {
+        board_trim(g->mode);
+    }
+    if (g_board_count >= BOARD_MAX) {
+        return 0;
+    }
+    e = &g_board[g_board_count++];
+    memset(e, 0, sizeof(*e));
+    e->mode = g->mode;
+    e->score = g->score;
+    e->lines = g->lines;
+    e->time_us = g->elapsed_us;
+    e->finished = g->finished;
+    if (tm) {
+        strftime(e->date, sizeof(e->date), "%Y-%m-%d", tm);
+    } else {
+        snprintf(e->date, sizeof(e->date), "?");
+    }
+    snprintf(e->name, sizeof(e->name), "%s",
+             g->player[0] ? g->player : "anon");
+
+    mine = g_board_count - 1;
+    n = board_top(g->mode, idx, BOARD_SHOWN);
+    for (i = 0; i < n; i++) {
+        if (idx[i] == mine) {
+            rank = i + 1;
+            break;
+        }
+    }
+    board_trim(g->mode);
+    board_save();
+    return rank;
+}
+
+/* ------------------------------------------------------------------ *
  * Panels and overlays
  * ------------------------------------------------------------------ */
 
@@ -2143,8 +2418,7 @@ static void draw_centered(int y, int color, int bold, const char *fmt, ...)
     scr_text((g_scr_w - (int)strlen(buf)) / 2, y, color, bold, "%s", buf);
 }
 
-static long g_best[MODE_COUNT];
-static long g_best_time[MODE_COUNT];
+static int g_last_rank;         /* place the finished run took */
 
 static void draw_gameover(const game_t *g)
 {
@@ -2161,11 +2435,10 @@ static void draw_gameover(const game_t *g)
     draw_centered(y + 4, C_TEXT, 0, "lines  %d", g->lines);
     draw_centered(y + 5, C_TEXT, 0, "time   %s", buf);
     draw_centered(y + 6, C_TEXT, 0, "pieces %d", g->pieces);
-    if (g->mode == MODE_SPRINT && g_best_time[MODE_SPRINT] > 0) {
-        fmt_time(buf, sizeof(buf), g_best_time[MODE_SPRINT]);
-        draw_centered(y + 7, C_DIM, 0, "best   %s", buf);
-    } else if (g_best[g->mode] > 0) {
-        draw_centered(y + 7, C_DIM, 0, "best   %ld", g_best[g->mode]);
+    if (g_last_rank == 1) {
+        draw_centered(y + 7, C_WARN, 1, "top of the scoreboard, %s", g->player);
+    } else if (g_last_rank > 0) {
+        draw_centered(y + 7, C_GOOD, 0, "number %d on the scoreboard", g_last_rank);
     }
     {
         const char *hint = "r restart    esc menu    q quit";
@@ -2191,39 +2464,111 @@ static void draw_pause(void)
     draw_centered(y + 3, C_DIM, 0, "esc resume   q quit");
 }
 
-static int g_menu_sel;
+static int g_menu_sel = MENU_MARATHON;
+static int g_name_editing;
+static int g_board_mode;
 
 static void draw_menu(void)
 {
-    int w = 52, h = 19;
+    int w = 54, h = 20;
     int x = (g_scr_w - w) / 2;
     int y = (g_scr_h - h) / 2;
+    int len = (int)strlen(g_player);
     int i;
 
     draw_box(x, y, w, h, C_ACCENT);
     draw_centered(y + 1, C_ACCENT, 1, "ULTIMATE TERMINAL TETRIS");
     draw_centered(y + 2, C_TEXT, 0, "by Alextout");
 
-    for (i = 0; i < MODE_COUNT; i++) {
-        int sel = (i == g_menu_sel);
-        int row = y + 4 + i * 2;
+    /* the name that goes on the scoreboard */
+    {
+        int sel = (g_menu_sel == MENU_NAME);
+        int row = y + 4;
 
         scr_text(x + 4, row, sel ? C_ACCENT : C_TEXT, sel,
-                 "%s %-9s", sel ? ">" : " ", MODE_NAME[i]);
-        scr_text(x + 17, row, C_DIM, 0, "%s", MODE_DESC[i]);
-        if (i == MODE_SPRINT && g_best_time[i] > 0) {
-            char buf[32];
+                 "%s %-9s", sel ? ">" : " ", "NAME");
+        scr_put(x + 17, row, "[", C_DIM, C_DEFAULT, 0);
+        for (i = 0; i < NAME_MAX; i++) {
+            char ch[2] = {' ', 0};
+            int cursor = (g_name_editing && i == len);
 
-            fmt_time(buf, sizeof(buf), g_best_time[i]);
-            scr_text(x + 17, row + 1, C_GOOD, 0, "best %s", buf);
-        } else if (g_best[i] > 0) {
-            scr_text(x + 17, row + 1, C_GOOD, 0, "best %ld", g_best[i]);
+            if (i < len) {
+                ch[0] = g_player[i];
+            }
+            scr_put(x + 18 + i, row, ch, C_TEXT,
+                    cursor ? C_ACCENT : C_DEFAULT, 0);
+        }
+        scr_put(x + 18 + NAME_MAX, row, "]", C_DIM, C_DEFAULT, 0);
+        if (g_name_editing) {
+            scr_text(x + 20 + NAME_MAX, row, C_WARN, 1, "typing");
+        } else if (!len) {
+            scr_text(x + 20 + NAME_MAX, row, C_DIM, 0, "unset");
         }
     }
-    draw_centered(y + 12, C_DIM, 0, "guideline rules, tetrio handling");
-    draw_centered(y + 14, C_DIM, 0, "after the DVK tetris by Kirill Timofeev");
-    draw_centered(y + 15, C_DIM, 0, "github.com/kt97679/tetris");
-    draw_centered(y + h - 2, C_DIM, 0, "up/down choose   enter start   q quit");
+
+    for (i = MENU_MARATHON; i <= MENU_ZEN; i++) {
+        int sel = (i == g_menu_sel);
+        int row = y + 6 + (i - MENU_MARATHON);
+        int mode = i - MENU_MARATHON;
+
+        scr_text(x + 4, row, sel ? C_ACCENT : C_TEXT, sel,
+                 "%s %-9s", sel ? ">" : " ", MODE_NAME[mode]);
+        scr_text(x + 17, row, C_DIM, 0, "%s", MODE_DESC[mode]);
+    }
+    {
+        int sel = (g_menu_sel == MENU_BOARD);
+
+        scr_text(x + 4, y + 11, sel ? C_ACCENT : C_TEXT, sel,
+                 "%s %-9s", sel ? ">" : " ", "SCOREBOARD");
+        scr_text(x + 17, y + 11, C_DIM, 0, "who got how far");
+    }
+
+    draw_centered(y + 13, C_DIM, 0, "guideline rules, tetrio handling");
+    draw_centered(y + 15, C_DIM, 0, "after the DVK tetris by Kirill Timofeev");
+    draw_centered(y + 16, C_DIM, 0, "github.com/kt97679/tetris");
+    draw_centered(y + h - 2, C_DIM, 0, g_name_editing
+                  ? "type a name   backspace deletes   enter done"
+                  : "up/down choose   enter select   q quit");
+}
+
+static void draw_scoreboard(void)
+{
+    int w = 60, h = 20;
+    int x = (g_scr_w - w) / 2;
+    int y = (g_scr_h - h) / 2;
+    int idx[BOARD_SHOWN];
+    char buf[32];
+    int n, i;
+
+    draw_box(x, y, w, h, C_ACCENT);
+    draw_centered(y + 1, C_ACCENT, 1, "SCOREBOARD");
+    draw_centered(y + 2, C_TEXT, 1, "< %s >", MODE_NAME[g_board_mode]);
+
+    scr_text(x + 3, y + 4, C_DIM, 0, "#");
+    scr_text(x + 6, y + 4, C_DIM, 0, "NAME");
+    scr_text(x + 23, y + 4, C_DIM, 0, "%8s", "SCORE");
+    scr_text(x + 32, y + 4, C_DIM, 0, "LINES");
+    scr_text(x + 38, y + 4, C_DIM, 0, "TIME");
+    scr_text(x + 48, y + 4, C_DIM, 0, "DATE");
+
+    n = board_top(g_board_mode, idx, BOARD_SHOWN);
+    for (i = 0; i < n; i++) {
+        const score_entry *e = &g_board[idx[i]];
+        int row = y + 5 + i;
+        int color = (i == 0) ? C_WARN : C_TEXT;
+
+        scr_text(x + 3, row, color, i == 0, "%d", i + 1);
+        scr_text(x + 6, row, color, i == 0, "%-16s", e->name);
+        scr_text(x + 23, row, color, 0, "%8ld", e->score);
+        scr_text(x + 32, row, color, 0, "%5d", e->lines);
+        fmt_time(buf, sizeof(buf), e->time_us);
+        scr_text(x + 38, row, color, 0, "%-9s", buf);
+        scr_text(x + 48, row, C_DIM, 0, "%s", e->date);
+    }
+    if (!n) {
+        draw_centered(y + 9, C_DIM, 0, "no runs in this mode yet");
+    }
+    draw_centered(y + h - 2, C_DIM, 0, "left/right mode   esc back");
 }
 
 static void draw_too_small(void)
@@ -2232,109 +2577,6 @@ static void draw_too_small(void)
     scr_text(0, 0, C_WARN, 1, "Terminal too small");
     scr_text(0, 1, C_DIM, 0, "need %dx%d, have %dx%d",
              MIN_SCREEN_W, MIN_SCREEN_H, g_scr_w, g_scr_h);
-}
-
-/* ------------------------------------------------------------------ *
- * High scores
- * ------------------------------------------------------------------ */
-
-/* Directory the binary sits in. The config file and the high scores live
- * there, so the whole project stays in one folder instead of scattering into
- * the home directory. */
-static char g_base_dir[1024] = ".";
-
-static void locate_base_dir(const char *argv0)
-{
-    char *resolved;
-    char *slash;
-
-    if (argv0 && strchr(argv0, '/')) {
-        resolved = realpath(argv0, NULL);
-        if (resolved) {
-            slash = strrchr(resolved, '/');
-            if (slash && slash != resolved) {
-                *slash = '\0';
-                snprintf(g_base_dir, sizeof(g_base_dir), "%s", resolved);
-                free(resolved);
-                return;
-            }
-            free(resolved);
-        }
-    }
-    /* started through PATH: fall back to where we were launched from */
-    if (!getcwd(g_base_dir, sizeof(g_base_dir))) {
-        snprintf(g_base_dir, sizeof(g_base_dir), ".");
-    }
-}
-
-static void scores_path(char *buf, size_t n, int mkdirs)
-{
-    (void)mkdirs;
-    snprintf(buf, n, "%s/scores", g_base_dir);
-}
-
-static void scores_load(void)
-{
-    char path[600];
-    char line[256];
-    FILE *f;
-
-    scores_path(path, sizeof(path), 0);
-    f = fopen(path, "r");
-    if (!f) {
-        return;
-    }
-    while (fgets(line, sizeof(line), f)) {
-        char name[32];
-        long score, us;
-
-        if (sscanf(line, "%31s %ld %ld", name, &score, &us) == 3) {
-            int i;
-
-            for (i = 0; i < MODE_COUNT; i++) {
-                if (strcmp(name, MODE_NAME[i]) == 0) {
-                    g_best[i] = score;
-                    g_best_time[i] = us;
-                }
-            }
-        }
-    }
-    fclose(f);
-}
-
-static void scores_save(void)
-{
-    char path[600];
-    FILE *f;
-    int i;
-
-    scores_path(path, sizeof(path), 1);
-    f = fopen(path, "w");
-    if (!f) {
-        return;
-    }
-    for (i = 0; i < MODE_COUNT; i++) {
-        fprintf(f, "%s %ld %ld\n", MODE_NAME[i], g_best[i], g_best_time[i]);
-    }
-    fclose(f);
-}
-
-static void scores_submit(const game_t *g)
-{
-    int dirty = 0;
-
-    if (g->score > g_best[g->mode]) {
-        g_best[g->mode] = g->score;
-        dirty = 1;
-    }
-    if (g->mode == MODE_SPRINT && g->finished &&
-        (g_best_time[MODE_SPRINT] == 0 || g->elapsed_us < g_best_time[MODE_SPRINT])) {
-        g_best_time[MODE_SPRINT] = g->elapsed_us;
-        dirty = 1;
-    }
-    if (dirty) {
-        scores_save();
-    }
 }
 
 /* ------------------------------------------------------------------ *
@@ -2510,10 +2752,12 @@ static void usage(void)
     printf("  --seed=N        fixed randomiser seed\n");
     printf("  --selftest      run the internal test suite and exit\n");
     printf("  --help          this text\n\n");
-    printf("The config file and the high scores sit next to the binary, in\n");
-    printf("config and scores, so the whole project stays in one folder. The\n");
-    printf("config takes one 'key = value' per line, the same names as the\n");
-    printf("options above plus key_left, key_hard_drop, ... for the bindings.\n");
+    printf("The config file and the scoreboard sit next to the binary, in\n");
+    printf("config and scoreboard, so the whole project stays in one folder.\n");
+    printf("The config takes one 'key = value' per line, the same names as\n");
+    printf("the options above plus key_left, key_hard_drop, ... for bindings.\n");
+    printf("The scoreboard is plain text: mode, score, lines, time in\n");
+    printf("microseconds, whether the run finished, the date and the name.\n");
 }
 
 /* ------------------------------------------------------------------ *
@@ -3081,11 +3325,15 @@ static int run_selftest(void)
  * ------------------------------------------------------------------ */
 
 static int g_in_menu = 1;
+static int g_in_board;
 static int g_submitted;
 
 static void start_game(int mode)
 {
     game_reset(&g_game, mode);
+    snprintf(g_game.player, sizeof(g_game.player), "%s",
+             g_player[0] ? g_player : "anon");
+    g_last_rank = 0;
     g_in_menu = 0;
     g_submitted = 0;
     g_shift_dir = 0;
@@ -3162,14 +3410,14 @@ int main(int argc, char **argv)
     }
 
     rng_seed(seed ? seed : (unsigned long)time(NULL) ^ (unsigned long)getpid());
-    scores_load();
+    board_load();
     detect_color_depth();
     term_init();
     kitty_enable();
     term_size();
     layout();
     scr_invalidate();
-    g_menu_sel = g_cfg.mode;
+    g_menu_sel = MENU_MARATHON + g_cfg.mode;
     game_reset(&g_game, g_cfg.mode);
     if (mode_given) {
         start_game(g_cfg.mode);   /* an explicit --mode skips the menu */
@@ -3202,30 +3450,95 @@ int main(int argc, char **argv)
             continue;
         }
 
-        if (action_pressed(ACT_QUIT)) {
-            break;
-        }
-        if (action_pressed(ACT_STYLE)) {
-            g_cfg.style = (g_cfg.style + 1) % STYLE_COUNT;
-            scr_invalidate();
-        }
-        if (action_pressed(ACT_HELP)) {
-            g_help_visible = !g_help_visible;
+        if (g_name_editing) {
+            int k;
+
+            if (g_keys[K_BACKSPACE].edges) {
+                size_t len = strlen(g_player);
+
+                if (len) {
+                    g_player[len - 1] = '\0';
+                }
+            }
+            if (g_keys[K_ENTER].edges || g_keys[K_ESC].edges) {
+                g_name_editing = 0;
+                board_save();       /* remember the name for next time */
+            } else {
+                for (k = 0; k < g_text_len; k++) {
+                    size_t len = strlen(g_player);
+
+                    if (len < NAME_MAX) {
+                        g_player[len] = g_text[k];
+                        g_player[len + 1] = '\0';
+                    }
+                }
+            }
+            /* while typing, no key means anything else */
+            for (k = 0; k < K_MAX; k++) {
+                g_keys[k].edges = 0;
+            }
+            g_text_len = 0;
+        } else {
+            g_text_len = 0;
+            if (action_pressed(ACT_QUIT)) {
+                break;
+            }
+            if (action_pressed(ACT_STYLE)) {
+                g_cfg.style = (g_cfg.style + 1) % STYLE_COUNT;
+                scr_invalidate();
+            }
+            if (action_pressed(ACT_HELP)) {
+                g_help_visible = !g_help_visible;
+            }
         }
 
-        if (g_in_menu) {
-            if (g_keys[K_UP].edges) {
-                g_keys[K_UP].edges = 0;
-                g_menu_sel = (g_menu_sel + MODE_COUNT - 1) % MODE_COUNT;
+        if (g_in_board) {
+            while (g_keys[K_LEFT].edges > 0) {
+                g_keys[K_LEFT].edges--;
+                g_board_mode = (g_board_mode + MODE_COUNT - 1) % MODE_COUNT;
             }
-            if (g_keys[K_DOWN].edges) {
-                g_keys[K_DOWN].edges = 0;
-                g_menu_sel = (g_menu_sel + 1) % MODE_COUNT;
+            while (g_keys[K_RIGHT].edges > 0) {
+                g_keys[K_RIGHT].edges--;
+                g_board_mode = (g_board_mode + 1) % MODE_COUNT;
+            }
+            if (g_keys[K_ENTER].edges || action_pressed(ACT_PAUSE)) {
+                g_keys[K_ENTER].edges = 0;
+                g_in_board = 0;
+            }
+        } else if (g_in_menu) {
+            /* one step per press, not per frame, so nothing is lost when two
+             * land between two frames */
+            while (g_keys[K_UP].edges > 0) {
+                g_keys[K_UP].edges--;
+                g_menu_sel = (g_menu_sel + MENU_COUNT - 1) % MENU_COUNT;
+            }
+            while (g_keys[K_DOWN].edges > 0) {
+                g_keys[K_DOWN].edges--;
+                g_menu_sel = (g_menu_sel + 1) % MENU_COUNT;
             }
             if (g_keys[K_ENTER].edges || g_keys[K_SPACE].edges) {
                 g_keys[K_ENTER].edges = 0;
                 g_keys[K_SPACE].edges = 0;
-                start_game(g_menu_sel);
+                if (g_menu_sel == MENU_NAME) {
+                    g_name_editing = 1;
+                    g_text_len = 0;
+                } else if (g_menu_sel == MENU_BOARD) {
+                    int probe[1];
+                    int m;
+
+                    /* open on a mode that has something to show */
+                    if (!board_top(g_board_mode, probe, 1)) {
+                        for (m = 0; m < MODE_COUNT; m++) {
+                            if (board_top(m, probe, 1)) {
+                                g_board_mode = m;
+                                break;
+                            }
+                        }
+                    }
+                    g_in_board = 1;
+                } else {
+                    start_game(g_menu_sel - MENU_MARATHON);
+                }
             }
             action_pressed(ACT_PAUSE);   /* swallow escape in the menu */
         } else {
@@ -3249,7 +3562,8 @@ int main(int argc, char **argv)
                     keys_clear();
                 } else if (g_game.state == STATE_GAMEOVER) {
                     g_in_menu = 1;
-                    g_menu_sel = g_game.mode;
+                    g_menu_sel = MENU_MARATHON + g_game.mode;
+                    g_board_mode = g_game.mode;
                     /* Whatever was still held or queued belongs to the run
                      * that just ended; without this a player who was mashing
                      * hard drop would start the next run on the way in. */
@@ -3259,12 +3573,14 @@ int main(int argc, char **argv)
             game_update(&g_game, dt);
             if (g_game.state == STATE_GAMEOVER && !g_submitted) {
                 g_submitted = 1;
-                scores_submit(&g_game);
+                g_last_rank = board_add(&g_game);
             }
         }
 
         scr_clear();
-        if (g_in_menu) {
+        if (g_in_board) {
+            draw_scoreboard();
+        } else if (g_in_menu) {
             draw_menu();
         } else {
             draw_border(&g_game);

@@ -57,8 +57,31 @@ Four modes: marathon (150 lines), sprint (40 lines against the clock), ultra
 (two minutes for the highest score) and zen (no goal).
 
 Everything the game reads or writes stays in this folder: `config` for the
-settings and `scores` for the best results, both next to the binary. Nothing
-is scattered into `~/.config` or `~/.local`.
+settings and `scoreboard` for the results, both next to the binary. Nothing is
+scattered into `~/.config` or `~/.local`.
+
+## Name and scoreboard
+
+The start screen has a name field. Select it, press enter, type, press enter
+again — that name goes on every run you start afterwards, and it is remembered
+between sessions.
+
+`SCOREBOARD` in the same menu opens the table without leaving the game. Left
+and right switch between the modes, escape goes back. Sprint ranks on time,
+because it is a race; every other mode ranks on score. After a run the game
+over screen tells you which place you took.
+
+The `scoreboard` file is plain text, one run per line, so you can read it,
+edit it or throw it away without the game's help:
+
+```
+player Alextout
+ZEN 2140 12 84150000 0 2026-09-09 Alextout
+SPRINT 3800 40 61300000 1 2026-09-09 Alextout
+```
+
+Mode, score, lines, time in microseconds, whether the run reached its goal,
+the date, and the name. The game keeps the best fifty runs per mode.
 
 ## Controls
 

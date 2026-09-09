@@ -44,7 +44,7 @@ Read it top to bottom; the sections are marked with banner comments.
 6. Movement, rotation, T-spin detection, locking, scoring
 7. Input: kitty protocol negotiation, escape parsing, key state
 8. Handling: DAS, ARR, soft drop
-9. Drawing: board, panels, overlays, menu
+9. Scoreboard file, then drawing: board, panels, overlays, menu, scoreboard
 10. High scores, config file, command line
 11. Self test
 12. Main loop
@@ -95,7 +95,12 @@ published SRS tables with every y negated, because this code has y growing
 downwards. If you touch them, `test_tspin` is the check that matters — it
 rotates a T into a slot reachable only through the third kick offset.
 
-**The game owns its folder.** `config` and `scores` sit next to the binary,
+**Typed text is a separate channel.** `g_text` collects characters as typed,
+case intact, because the key state lowercases everything — bindings do not
+care about shift, the name field does. Only the name editor reads it, and the
+main loop clears it every frame it is not editing.
+
+**The game owns its folder.** `config` and `scoreboard` sit next to the binary,
 found through `locate_base_dir` from `argv[0]`. Nothing is written to
 `~/.config` or `~/.local`; keep it that way. Started through PATH with no
 slash in `argv[0]` it falls back to the working directory.
