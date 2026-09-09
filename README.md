@@ -1,9 +1,29 @@
 # ultimate-terminal-tetris
+# by Alextout
 
 Tetris for the terminal, with the feel of the NES original.
 One C file, no dependencies, one compiler call.
 
-*by Alextout*
+> **Note:** I developed this project purely for fun and for my own personal use. However, it is freely available for everyone. Feel free to grab it, play it, and do whatever you want with it!
+
+## Requirements
+
+- A C compiler — Apple clang (`xcode-select --install`) or gcc. No libraries
+  are needed, not even libm.
+- A terminal at least 62×24 characters. Truecolour or 256 colours look best;
+  it falls back to the 8 ANSI colours on its own.
+- Python 3 for the checks in `tools/` — standard library only, nothing to
+  install with pip. Not needed to play.
+- `make` is optional; a single `clang` call builds the same binary.
+
+Developed and tested on **iTerm2 3.6.11** on macOS (Apple silicon). It runs in
+any terminal, but iTerm2 is where it is built: from version 3.5 on it speaks
+the kitty keyboard protocol, which reports key releases — and knowing how long
+a key has been held is what makes real DAS/ARR possible at all. kitty,
+ghostty, foot and WezTerm report them too. Everywhere else the game falls back
+to timing the operating system's auto repeat, which works but feels looser.
+The help panel tells you which of the two you are in.
+
 
 ```
                 MARATHON
@@ -60,16 +80,6 @@ the three-corner rule, back-to-back, combos and perfect clears.
 Four modes — marathon, sprint, ultra, zen — plus a name field and a scoreboard
 you can open from the menu.
 
-**Handling is the NES one**: 266 ms before the auto shift starts (16 frames),
-then a cell every 100 ms (6 frames), and a soft drop fixed at 30 rows a second
-(one row every two frames) instead of scaling with gravity. Change it in
-`config` or on the command line, `--das --arr --sdf`. `./tetris --help` lists
-everything.
-
-Terminals that speak the **kitty keyboard protocol** report key releases, which
-is what makes real DAS possible; iTerm2, kitty, ghostty, foot and WezTerm do.
-Elsewhere the game falls back to the OS key repeat and says so on screen.
-
 ## Files
 
 Everything stays in this folder, nothing lands in your home directory. Copy
@@ -89,8 +99,12 @@ timing.
 
 ## Credits
 
+Written by Alextout together with [Claude](https://claude.com/claude-code)
+(Claude Code, Opus 5) — every commit is co-authored accordingly.
+
 Grew out of the C port in **Kirill Timofeev**'s
 [tetris](https://github.com/kt97679/tetris), a recreation of the game from
 soviet DVK machines. None of that code is left, but it is where this started.
 
 Licensed under the [MIT License](LICENSE).
+
