@@ -1,0 +1,5 @@
+tetris
+*.o
+*.dSYM/
+__pycache__/
+.DS_Store
