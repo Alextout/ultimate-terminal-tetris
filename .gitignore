@@ -1,4 +1,5 @@
 tetris
+scores
 *.o
 *.dSYM/
 __pycache__/

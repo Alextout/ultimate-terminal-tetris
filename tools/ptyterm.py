@@ -29,8 +29,10 @@ class Screen:
         self.cols = cols
         self.rows = rows
         self.cells = {}
+        self.backgrounds = {}   # only where a cell carries a non-default one
         self.x = 1
         self.y = 1
+        self._bg = None
         self._partial = ""
 
     def feed(self, data):
@@ -55,12 +57,52 @@ class Screen:
                     self.x = int(parts[1]) if len(parts) > 1 and parts[1] else 1
                 elif final == "J" and body in ("2", ""):
                     self.cells.clear()
+                    self.backgrounds.clear()
+                elif final == "m":
+                    self._sgr(body)
                 i = m.end()
             elif c in "\r\n":
                 i += 1
             else:
                 self.cells[(self.x, self.y)] = c
+                if self._bg is None:
+                    self.backgrounds.pop((self.x, self.y), None)
+                else:
+                    self.backgrounds[(self.x, self.y)] = self._bg
                 self.x += 1
+                i += 1
+
+    def _sgr(self, body):
+        """Track the background colour; the foreground does not matter here.
+
+        An extended colour carries its own arguments, and they have to be
+        consumed. Reading them as further codes turns any colour channel that
+        happens to land in 40..47 into a background, which then bleeds over
+        every cell drawn after it.
+        """
+        params = [int(p) if p.isdigit() else 0 for p in body.split(";")] or [0]
+        i = 0
+        while i < len(params):
+            p = params[i]
+            if p in (0, 49):
+                self._bg = None
+                i += 1
+            elif p in (38, 48, 58):
+                mode = params[i + 1] if i + 1 < len(params) else 0
+                if mode == 2:
+                    value, used = tuple(params[i + 2:i + 5]), 5
+                elif mode == 5:
+                    value = params[i + 2] if i + 2 < len(params) else 0
+                    used = 3
+                else:
+                    value, used = None, 1
+                if p == 48:
+                    self._bg = value
+                i += used
+            elif 40 <= p <= 47:
+                self._bg = p
+                i += 1
+            else:
                 i += 1
 
     def render(self):
@@ -72,6 +114,11 @@ class Screen:
         while lines and not lines[-1]:
             lines.pop()
         return "\n".join(lines)
+
+    def bg_run(self, x, y, length):
+        """How many of `length` cells from (x, y) carry a background."""
+        return sum(1 for i in range(length)
+                   if (x + i, y) in self.backgrounds)
 
     def occupied(self):
         """Every cell that is not blank, for comparing two screen states."""

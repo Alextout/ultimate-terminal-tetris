@@ -54,8 +54,11 @@ Mechanics follow the tetris guideline:
 - **Back-to-back**, **combos** and **perfect clears**
 
 Four modes: marathon (150 lines), sprint (40 lines against the clock), ultra
-(two minutes for the highest score) and zen (no goal). Best results are kept
-in `~/.local/share/tetris/scores`.
+(two minutes for the highest score) and zen (no goal).
+
+Everything the game reads or writes stays in this folder: `config` for the
+settings and `scores` for the best results, both next to the binary. Nothing
+is scattered into `~/.config` or `~/.local`.
 
 ## Controls
 
@@ -71,7 +74,7 @@ in `~/.local/share/tetris/scores`.
 | v | switch between the solid and the classic `[]` look |
 | h | show or hide the help panel |
 | esc | pause, and back to the menu after a game |
-| r | restart |
+| r | hold to restart |
 | q | quit |
 
 ## Handling
@@ -95,15 +98,15 @@ of one row every two frames at 60 Hz. It can only ever speed the piece up, so
 at high levels, where gravity is already quicker, holding down does nothing —
 same as on the NES. `--sdf=0` drops instantly.
 
-Set them on the command line or in `~/.config/tetris/config`:
+Set them on the command line or in the `config` file next to the binary. That
+file ships with every option commented out and its default written down, so
+uncommenting a line is the whole job:
 
 ```ini
-# handling
 das  = 266
 arr  = 100
 sdf  = 30
 
-# looks
 style = solid      # or classic
 ghost = 1
 
@@ -115,6 +118,12 @@ key_hold       = c, lshift, tab
 ```
 
 `./tetris --help` lists every option.
+
+## Restart is a hold
+
+`r` does not reset the run on a stray press. Hold it for about seven tenths of
+a second and a bar fills in behind the `r restart` line in the help panel;
+the run only ends when the bar is full. Letting go early cancels it.
 
 ## Key releases, and why they matter
 
@@ -136,7 +145,7 @@ a fixed seed — no terminal involved, so it is fine in CI:
 ./tetris --selftest
 ```
 
-Fourteen checks, covering the kick tables against known cases, the bag, the
+Fifteen checks, covering the kick tables against known cases, the bag, the
 three-corner rule, scoring with back-to-back and combos, the clear animation,
 the soft drop rate and the mode goals.
 

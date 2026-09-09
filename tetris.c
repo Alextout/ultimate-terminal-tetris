@@ -51,6 +51,7 @@
 #define LOCK_DELAY_US 500000L
 #define LOCK_RESET_LIMIT 15
 #define LINE_CLEAR_ANIM_US 150000L
+#define RESTART_HOLD_US 700000L /* hold r this long to throw the run away */
 #define FRAME_US 16666L         /* ~60 Hz */
 
 enum { PIECE_I, PIECE_J, PIECE_L, PIECE_O, PIECE_S, PIECE_T, PIECE_Z, PIECE_COUNT };
@@ -524,6 +525,21 @@ static void scr_text(int x, int y, int fg, int bold, const char *fmt, ...)
     for (i = 0; buf[i]; i++) {
         ch[0] = buf[i];
         scr_put(x + i, y, ch, fg, C_DEFAULT, bold);
+    }
+}
+
+/* Text whose first `filled` columns sit on a coloured background: a progress
+ * bar drawn behind the label rather than next to it. */
+static void scr_text_bar(int x, int y, int fg, int bold, int filled,
+                         int bar_color, const char *text)
+{
+    char ch[2] = {0, 0};
+    int i;
+
+    for (i = 0; text[i]; i++) {
+        ch[0] = text[i];
+        scr_put(x + i, y, ch, i < filled ? C_TEXT : fg,
+                i < filled ? bar_color : C_DEFAULT, bold);
     }
 }
 
@@ -1577,6 +1593,7 @@ static void kitty_enable(void)
  * Handling: DAS, ARR and soft drop
  * ------------------------------------------------------------------ */
 
+static long g_restart_hold;
 static int g_shift_dir;
 static int g_das_charged;
 static int g_soft_held;
@@ -2069,7 +2086,16 @@ static void draw_panels(const game_t *g)
         scr_text(hx, hy++, C_DIM, 0, "v           style");
         scr_text(hx, hy++, C_DIM, 0, "h           this help");
         scr_text(hx, hy++, C_DIM, 0, "esc         pause");
-        scr_text(hx, hy++, C_DIM, 0, "r           restart");
+        {
+            const char *label = "r           restart";
+            int width = (int)strlen(label);
+            int filled = (int)(g_restart_hold * width / RESTART_HOLD_US);
+
+            if (filled > width) {
+                filled = width;
+            }
+            scr_text_bar(hx, hy++, C_DIM, 0, filled, C_WARN, label);
+        }
         scr_text(hx, hy++, C_DIM, 0, "q           quit");
         hy++;
         scr_text(hx, hy++, C_DIM, 0, "DAS %ldms", g_cfg.das_us / 1000);
@@ -2141,7 +2167,17 @@ static void draw_gameover(const game_t *g)
     } else if (g_best[g->mode] > 0) {
         draw_centered(y + 7, C_DIM, 0, "best   %ld", g_best[g->mode]);
     }
-    draw_centered(y + 9, C_ACCENT, 1, "r restart    esc menu    q quit");
+    {
+        const char *hint = "r restart    esc menu    q quit";
+        int hx = (g_scr_w - (int)strlen(hint)) / 2;
+        int seg = 9;            /* the "r restart" part carries the bar */
+        int filled = (int)(g_restart_hold * seg / RESTART_HOLD_US);
+
+        if (filled > seg) {
+            filled = seg;
+        }
+        scr_text_bar(hx, y + 9, C_ACCENT, 1, filled, C_WARN, hint);
+    }
 }
 
 static void draw_pause(void)
@@ -2202,23 +2238,39 @@ static void draw_too_small(void)
  * High scores
  * ------------------------------------------------------------------ */
 
+/* Directory the binary sits in. The config file and the high scores live
+ * there, so the whole project stays in one folder instead of scattering into
+ * the home directory. */
+static char g_base_dir[1024] = ".";
+
+static void locate_base_dir(const char *argv0)
+{
+    char *resolved;
+    char *slash;
+
+    if (argv0 && strchr(argv0, '/')) {
+        resolved = realpath(argv0, NULL);
+        if (resolved) {
+            slash = strrchr(resolved, '/');
+            if (slash && slash != resolved) {
+                *slash = '\0';
+                snprintf(g_base_dir, sizeof(g_base_dir), "%s", resolved);
+                free(resolved);
+                return;
+            }
+            free(resolved);
+        }
+    }
+    /* started through PATH: fall back to where we were launched from */
+    if (!getcwd(g_base_dir, sizeof(g_base_dir))) {
+        snprintf(g_base_dir, sizeof(g_base_dir), ".");
+    }
+}
+
 static void scores_path(char *buf, size_t n, int mkdirs)
 {
-    const char *home = getenv("HOME");
-    char dir[512];
-
-    if (!home) {
-        home = ".";
-    }
-    snprintf(dir, sizeof(dir), "%s/.local/share", home);
-    if (mkdirs) {
-        mkdir(dir, 0755);
-    }
-    snprintf(dir, sizeof(dir), "%s/.local/share/tetris", home);
-    if (mkdirs) {
-        mkdir(dir, 0755);
-    }
-    snprintf(buf, n, "%s/scores", dir);
+    (void)mkdirs;
+    snprintf(buf, n, "%s/scores", g_base_dir);
 }
 
 static void scores_load(void)
@@ -2396,15 +2448,11 @@ static int config_set(const char *key, const char *value)
 
 static void config_load(void)
 {
-    const char *home = getenv("HOME");
-    char path[600];
+    char path[1100];
     char line[256];
     FILE *f;
 
-    if (!home) {
-        return;
-    }
-    snprintf(path, sizeof(path), "%s/.config/tetris/config", home);
+    snprintf(path, sizeof(path), "%s/config", g_base_dir);
     f = fopen(path, "r");
     if (!f) {
         return;
@@ -2462,8 +2510,10 @@ static void usage(void)
     printf("  --seed=N        fixed randomiser seed\n");
     printf("  --selftest      run the internal test suite and exit\n");
     printf("  --help          this text\n\n");
-    printf("config file: ~/.config/tetris/config, one 'key = value' per line,\n");
-    printf("same names as the options plus key_left, key_hard_drop, ... for binds.\n");
+    printf("The config file and the high scores sit next to the binary, in\n");
+    printf("config and scores, so the whole project stays in one folder. The\n");
+    printf("config takes one 'key = value' per line, the same names as the\n");
+    printf("options above plus key_left, key_hard_drop, ... for the bindings.\n");
 }
 
 /* ------------------------------------------------------------------ *
@@ -2739,6 +2789,57 @@ static int test_das_arr(void)
     return ok;
 }
 
+/* On the NES the auto shift stays charged when a new piece arrives, which is
+ * what lets a held direction carry the next piece straight to the wall. */
+static int test_das_charge_survives_spawn(void)
+{
+    game_t g;
+    long saved_das = g_cfg.das_us;
+    long saved_arr = g_cfg.arr_us;
+    int x0, i, ok = 1;
+
+    g_cfg.das_us = 266000;
+    g_cfg.arr_us = 100000;
+    memset(&g, 0, sizeof(g));
+    g.hold = -1;
+    g.level = 1;
+    g.state = STATE_PLAYING;
+    rng_seed(5);
+    bag_refill(&g);
+    queue_fill(&g);
+    spawn_piece(&g, PIECE_T);
+    keys_clear();
+    g_shift_dir = 0;
+    g_das_acc = 0;
+    g_arr_acc = 0;
+    g_das_charged = 0;
+
+    key_press(K_LEFT, 1000);
+    update_shift(&g, 16000);
+    for (i = 0; i < 20; i++) {  /* hold past the delay */
+        update_shift(&g, 16000);
+    }
+    if (!g_das_charged) {
+        ok = 0;
+    }
+
+    spawn_piece(&g, PIECE_T);   /* a new piece, the key still held */
+    x0 = g.x;
+    update_shift(&g, 100000);
+    if (g.x >= x0) {
+        ok = 0;                 /* it must move without charging again */
+    }
+
+    keys_clear();
+    g_shift_dir = 0;
+    g_das_acc = 0;
+    g_arr_acc = 0;
+    g_das_charged = 0;
+    g_cfg.das_us = saved_das;
+    g_cfg.arr_us = saved_arr;
+    return ok;
+}
+
 static int test_soft_drop_start(void)
 {
     game_t g;
@@ -2963,6 +3064,7 @@ static int run_selftest(void)
     check(test_line_clear(), "completed row clears and the stack drops");
     check(test_clear_animation(), "clear animation resolves into a new piece");
     check(test_das_arr(), "auto shift waits for DAS then repeats at ARR");
+    check(test_das_charge_survives_spawn(), "auto shift stays charged across a piece");
     check(test_soft_drop_start(), "soft drop starts with a single row");
     check(test_soft_drop_rate(), "soft drop holds the NES rate at any level");
     check(test_scoring(), "scoring, back-to-back and combo");
@@ -2990,6 +3092,7 @@ static void start_game(int mode)
     g_das_acc = 0;
     g_arr_acc = 0;
     g_das_charged = 0;
+    g_restart_hold = 0;
     keys_clear();
 }
 
@@ -3016,6 +3119,7 @@ int main(int argc, char **argv)
     int mode_given = 0;
     int i;
 
+    locate_base_dir(argv[0]);
     config_load();
 
     for (i = 1; i < argc; i++) {
@@ -3125,9 +3229,19 @@ int main(int argc, char **argv)
             }
             action_pressed(ACT_PAUSE);   /* swallow escape in the menu */
         } else {
-            if (action_pressed(ACT_RESTART)) {
-                start_game(g_game.mode);
-            } else if (action_pressed(ACT_PAUSE)) {
+            /* Restarting throws away the run, so it wants a deliberate hold
+             * rather than a stray keypress. The help panel draws the bar. */
+            if (action_down(ACT_RESTART)) {
+                g_restart_hold += dt;
+                if (g_restart_hold >= RESTART_HOLD_US) {
+                    start_game(g_game.mode);
+                }
+            } else {
+                g_restart_hold = 0;
+            }
+            action_pressed(ACT_RESTART);        /* the edge alone does nothing */
+
+            if (action_pressed(ACT_PAUSE)) {
                 if (g_game.state == STATE_PLAYING) {
                     g_game.state = STATE_PAUSED;
                 } else if (g_game.state == STATE_PAUSED) {

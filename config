@@ -1,0 +1,56 @@
+# ultimate-terminal-tetris configuration
+#
+# This file lives next to the binary and is read on startup. Everything is
+# commented out and shows the built-in default, so uncomment only what you
+# want to change. Command line options override whatever is set here.
+
+# --- handling ---------------------------------------------------------------
+# The defaults are the NES timings.
+
+# Milliseconds you hold a direction before it starts repeating.
+# NES: 16 frames at 60 Hz. Modern stackers sit around 100.
+#das = 266
+
+# Milliseconds between repeats after that. 0 slides straight to the wall,
+# which is what most modern stackers default to.
+# NES: 6 frames at 60 Hz.
+#arr = 100
+
+# Soft drop speed in rows per second, a fixed rate rather than a multiple of
+# gravity. 0 drops the piece instantly.
+# NES: one row every two frames at 60 Hz.
+#sdf = 30
+
+# --- looks ------------------------------------------------------------------
+
+# solid = filled blocks, classic = the old [] and ' .' look
+#style = solid
+
+# Landing preview.
+#ghost = 1
+
+# Colour depth: 0 monochrome, 8, 256 or 24. Left alone it is detected from
+# COLORTERM and TERM.
+#colors = 0
+
+# Mode the menu starts on: marathon, sprint, ultra or zen.
+#mode = marathon
+
+# --- key bindings -----------------------------------------------------------
+# Several keys per action, comma separated. Names: left, right, up, down,
+# space, enter, tab, escape, backspace, lshift, rshift, lctrl, rctrl, or any
+# single character.
+
+#key_left       = left
+#key_right      = right
+#key_soft_drop  = down
+#key_hard_drop  = space
+#key_rotate_cw  = up, x
+#key_rotate_ccw = z, lctrl, rctrl
+#key_rotate_180 = a
+#key_hold       = c, lshift, rshift, tab
+#key_pause      = escape, p
+#key_restart    = r
+#key_quit       = q
+#key_style      = v
+#key_help       = h

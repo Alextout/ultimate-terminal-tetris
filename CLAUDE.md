@@ -16,7 +16,7 @@ header, the README and the start screen. Do not quietly drop it.
 
 ```sh
 clang -O2 -Wall -Wextra -o tetris tetris.c   # must stay warning free
-./tetris --selftest                          # 14 headless checks
+./tetris --selftest                          # 15 headless checks
 tools/screen_check.py ./tetris               # renderer vs full repaint
 tools/softdrop_check.py ./tetris             # soft drop timing
 tools/bench.py ./tetris                      # cpu, memory, frame size
@@ -92,6 +92,11 @@ below a few dozen milliseconds or arrow keys start registering as escapes.
 published SRS tables with every y negated, because this code has y growing
 downwards. If you touch them, `test_tspin` is the check that matters — it
 rotates a T into a slot reachable only through the third kick offset.
+
+**The game owns its folder.** `config` and `scores` sit next to the binary,
+found through `locate_base_dir` from `argv[0]`. Nothing is written to
+`~/.config` or `~/.local`; keep it that way. Started through PATH with no
+slash in `argv[0]` it falls back to the working directory.
 
 ## Conventions
 
