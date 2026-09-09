@@ -104,9 +104,9 @@ timing.
 
 ## Credits
 
-Written by Alextout together with [Claude](https://claude.com/claude-code)
-(Claude Code, Opus 5) and [Pi](https://github.com/badlogic/pi-coding-agent)
-(MiniMax-M3) — every commit is co-authored accordingly.
+Built with the help of [Claude](https://claude.com/claude-code) and
+[Pi](https://github.com/badlogic/pi-coding-agent); the design, the rules
+and the debugging are mine.
 
 Grew out of the C port in **Kirill Timofeev**'s
 [tetris](https://github.com/kt97679/tetris), a recreation of the game from
