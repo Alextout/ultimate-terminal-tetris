@@ -2551,7 +2551,7 @@ static void draw_menu(void)
         scr_text(x + 17, y + 11, C_DIM, 0, "who got how far");
     }
 
-    draw_centered(y + 13, C_DIM, 0, "guideline rules, tetrio handling");
+    draw_centered(y + 13, C_DIM, 0, "guideline rules, NES handling");
     draw_centered(y + 15, C_DIM, 0, "after the DVK tetris by Kirill Timofeev");
     draw_centered(y + 16, C_DIM, 0, "github.com/kt97679/tetris");
     draw_centered(y + h - 2, C_DIM, 0, g_name_editing
