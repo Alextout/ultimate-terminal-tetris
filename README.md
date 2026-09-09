@@ -43,7 +43,14 @@ To have it as a command anywhere, link the binary into a directory on your
 PATH:
 
 ```sh
-ln -s "$PWD/tetris" /opt/homebrew/bin/tetris     # or ~/bin, /usr/local/bin, ...
+mkdir -p ~/bin
+ln -s "$PWD/tetris" ~/bin/tetris
+```
+
+with `~/bin` on your PATH, which for zsh means a line in `~/.zshrc`:
+
+```sh
+export PATH="$HOME/bin:$PATH"
 ```
 
 The game asks the system where its own binary is and follows the symlink, so
