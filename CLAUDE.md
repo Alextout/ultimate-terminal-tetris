@@ -5,8 +5,8 @@ Notes for working in this repository.
 ## What this is
 
 `ultimate-terminal-tetris` — a guideline tetris for the terminal in a single C
-file. No dependencies, not even libm; `clang -O2 -o tetris tetris.c` is the
-whole build. Keep it that way: a new dependency needs a real reason.
+file. No dependencies, not even libm; `make` is a single compiler call. Keep
+it that way: a new dependency needs a real reason.
 
 It began as the C port in <https://github.com/kt97679/tetris> by Kirill
 Timofeev. None of that code is left, but the credit belongs in the file
@@ -15,8 +15,9 @@ header, the README and the start screen. Do not quietly drop it.
 ## Build and check
 
 ```sh
-clang -O2 -Wall -Wextra -o tetris tetris.c   # must stay warning free
-./tetris --selftest                          # 15 headless checks
+make                                         # must stay warning free
+make check                                   # selftest plus the pty tools
+./tetris --selftest                          # 15 headless checks, no terminal
 tools/screen_check.py ./tetris               # renderer vs full repaint
 tools/softdrop_check.py ./tetris             # soft drop timing
 tools/bench.py ./tetris                      # cpu, memory, frame size
@@ -45,7 +46,7 @@ Read it top to bottom; the sections are marked with banner comments.
 7. Input: kitty protocol negotiation, escape parsing, key state
 8. Handling: DAS, ARR, soft drop
 9. Scoreboard file, then drawing: board, panels, overlays, menu, scoreboard
-10. High scores, config file, command line
+10. Config file, command line
 11. Self test
 12. Main loop
 
@@ -100,8 +101,10 @@ case intact, because the key state lowercases everything — bindings do not
 care about shift, the name field does. Only the name editor reads it, and the
 main loop clears it every frame it is not editing.
 
-**The game owns its folder.** `config` and `scoreboard` sit next to the binary.
-Nothing is written to `~/.config` or `~/.local`; keep it that way.
+**The game owns its folder.** `config` and `scoreboard` sit next to the binary
+and are both git-ignored, so nobody's settings or scores travel with the repo;
+`config.example` is the tracked copy. Nothing is written to `~/.config` or
+`~/.local`; keep it that way.
 
 `locate_base_dir` cannot trust `argv[0]`: run as a bare command off PATH it is
 just `"tetris"` with no directory, and the game would look for its files in
@@ -126,5 +129,5 @@ only the fallback, and the working directory the fallback after that.
   `tools/` harness does not implement the protocol, so automated runs always
   exercise the fallback. A harness that answers the `CSI ? u` query would
   close that gap.
-- No LICENSE file yet. The upstream project is WTFPL; picking a licence for
-  this one is the owner's call.
+- The scoreboard has no way to delete a single entry from inside the game;
+  the file has to be edited by hand.

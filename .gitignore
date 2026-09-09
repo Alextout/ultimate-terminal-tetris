@@ -1,6 +1,8 @@
 tetris
+config
 scoreboard
 *.o
 *.dSYM/
 __pycache__/
 .DS_Store
+*.patch
